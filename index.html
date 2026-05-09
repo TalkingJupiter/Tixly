@@ -130,7 +130,7 @@
             <label>Date:<select id="detailDate"></select></label>
             <label>People:<input id="detailGuests" type="number" min="0" max="10" step="1" value="1" /></label>
             <button type="button" id="detailReserveButton">Reserve</button>
-            <small>You won’t be charged yet</small>
+            <small>You won't be charged yet</small>
           </aside>
         </div>
       </section>
@@ -261,8 +261,15 @@
               <input id="eventPriceInput" type="number" min="1" step="0.01" placeholder="Ticket price" required />
               <input id="eventCapacityInput" type="number" min="1" step="1" placeholder="Event capacity" required />
               <input id="eventImageInput" type="url" placeholder="Image URL optional" />
-              <button type="submit">Publish event</button>
+              <button type="submit" id="eventSubmitButton">Publish event</button>
+              <button type="button" id="cancelEventEditButton" class="cancel-edit-button" hidden>Cancel edit</button>
             </form>
+            <section class="organizer-events">
+              <h3>Your Events</h3>
+              <div id="organizerEventsList" class="organizer-event-list">
+                <p class="empty-state">No organizer events loaded yet.</p>
+              </div>
+            </section>
           </div>
         </div>
         <p class="organizer-status" id="organizerStatus" role="status"></p>
