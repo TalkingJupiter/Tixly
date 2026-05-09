@@ -94,6 +94,7 @@ def event_from_row(row: sqlite3.Row) -> dict:
         "dateValue": first_date,
         "availableDates": dates,
         "startTime": row["StartTime"],
+        "venueId": row["VenueID"],
         "location": row["Location"],
         "venue": row["Venue"],
         "organizer": row["Organizer"],
@@ -123,6 +124,10 @@ def fetch_events(filters: dict[str, str] | None = None) -> list[dict]:
         where.append("(e.Name LIKE ? OR e.Category LIKE ? OR v.Name LIKE ? OR o.Name LIKE ?)")
         term = f"%{filters['event']}%"
         params.extend([term, term, term, term])
+    
+    if filters.get("organizerId"):
+        where.append("e.organizerID = ?")
+        params.append(int(filters["organizerId"]))
 
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
     query = f"""
@@ -131,6 +136,7 @@ def fetch_events(filters: dict[str, str] | None = None) -> list[dict]:
             e.Name AS Event,
             e.Date,
             e.StartTime,
+            e.VenueID,
             e.Category,
             e.Capacity,
             e.ImageUrl,
@@ -139,7 +145,7 @@ def fetch_events(filters: dict[str, str] | None = None) -> list[dict]:
             v.Name AS Venue,
             v.Location,
             o.Name AS Organizer,
-            MIN(t.Price) AS Price,
+            COALESCE(MIN(CASE WHEN t.OrderID IS NULL THEN t.Price END), MIN(t.Price), 0) AS Price,
             SUM(CASE WHEN t.OrderID IS NOT NULL THEN 1 ELSE 0 END) AS TicketsSold,
             GROUP_CONCAT(DISTINCT ed.Date) AS AvailableDates
         FROM EVENT e
@@ -219,6 +225,10 @@ class TixlyHandler(SimpleHTTPRequestHandler):
                     ]
                     self.send_json({"venues": venues})
                     return
+                
+                if len(parts) == 4 and parts[3] == "events":
+                    self.send_json({"events": fetch_events({"organizerId": str(organizer_id)})})
+                    return
 
             self.send_json({"organizer": public_organizer(organizer)})
             return
@@ -239,6 +249,8 @@ class TixlyHandler(SimpleHTTPRequestHandler):
 
             self.send_json({"user": public_user(user)})
             return
+        
+        # if parsed.path.startswith
 
         super().do_GET()
 
@@ -251,6 +263,8 @@ class TixlyHandler(SimpleHTTPRequestHandler):
             "/api/organizer/login": self.handle_organizer_login,
             "/api/organizer/venues": self.handle_organizer_venue,
             "/api/organizer/events": self.handle_organizer_event,
+            "/api/organizer/events/update": self.handle_organizer_event_update,
+            "/api/organizer/events/delete": self.handle_organizer_event_delete,
         }
         handler = routes.get(self.path)
         if not handler:
@@ -474,6 +488,190 @@ class TixlyHandler(SimpleHTTPRequestHandler):
         event = next(item for item in fetch_events() if item["id"] == event_id)
         self.send_json({"event": event})
 
+    def handle_organizer_event_update(self, payload: dict) -> None:
+        event_id = int(payload.get("eventId") or 0)
+        name = str(payload.get("name") or "").strip()
+        category = str(payload.get("category") or "Music").strip()
+        venue_id = int(payload.get("venueId") or 0)
+        start_time = str(payload.get("startTime") or "").strip()
+        dates = [str(date).strip() for date in payload.get("dates", []) if str(date).strip()]
+        price = float(payload.get("price") or 0)
+        capacity = int(payload.get("capacity") or 0)
+        image_url = str(payload.get("imageUrl") or "").strip() or "assets/tixly-hero.png"
+
+        if event_id <= 0:
+            raise ValueError("Invalid event id.")
+        if not name:
+            raise ValueError("Enter an event name.")
+        if not dates:
+            raise ValueError("Add at least one event date.")
+        if not start_time:
+            raise ValueError("Add an event start time.")
+        if price <= 0:
+            raise ValueError("Ticket price must be greater than zero.")
+        if capacity <= 0:
+            raise ValueError("Event capacity must be greater than zero.")
+
+        for date in dates:
+            datetime.strptime(date, "%Y-%m-%d")
+
+        with connect_db() as connection:
+            organizer = self.organizer_from_payload(connection, payload)
+
+            event = connection.execute(
+                """
+                SELECT EventID
+                FROM EVENT
+                WHERE EventID = ? AND OrganizerID = ?
+                """,
+                (event_id, organizer["OrganizerID"]),
+            ).fetchone()
+
+            if not event:
+                self.send_json(
+                    {"error": "Event not found for this organizer."},
+                    HTTPStatus.NOT_FOUND,
+                )
+                return
+
+            venue = connection.execute(
+                """
+                SELECT VenueID
+                FROM VENUE
+                WHERE VenueID = ? AND OrganizerID = ?
+                """,
+                (venue_id, organizer["OrganizerID"]),
+            ).fetchone()
+
+            if not venue:
+                raise ValueError("Choose one of your registered venues.")
+
+            sold_tickets = connection.execute(
+                """
+                SELECT COUNT(*) AS Count
+                FROM TICKET
+                WHERE EventID = ? AND OrderID IS NOT NULL
+                """,
+                (event_id,),
+            ).fetchone()["Count"]
+
+            if sold_tickets > capacity:
+                raise ValueError("Capacity cannot be lower than existing reservations.")
+
+            connection.execute(
+                """
+                UPDATE EVENT
+                SET Name = ?,
+                    Date = ?,
+                    StartTime = ?,
+                    VenueID = ?,
+                    Capacity = ?,
+                    Category = ?,
+                    ImageUrl = ?
+                WHERE EventID = ? AND OrganizerID = ?
+                """,
+                (
+                    name,
+                    dates[0],
+                    start_time,
+                    venue_id,
+                    capacity,
+                    category,
+                    image_url,
+                    event_id,
+                    organizer["OrganizerID"],
+                ),
+            )
+
+            connection.execute("DELETE FROM EVENT_DATE WHERE EventID = ?", (event_id,))
+
+            for date in dates:
+                connection.execute(
+                    "INSERT INTO EVENT_DATE (EventID, Date) VALUES (?, ?)",
+                    (event_id, date),
+                )
+
+            connection.execute(
+                """
+                UPDATE TICKET
+                SET Price = ?
+                WHERE EventID = ? AND OrderID IS NULL
+                """,
+                (price, event_id),
+            )
+
+            base_ticket = connection.execute(
+                """
+                SELECT TicketID
+                FROM TICKET
+                WHERE EventID = ? AND OrderID IS NULL
+                LIMIT 1
+                """,
+                (event_id,),
+            ).fetchone()
+
+            if not base_ticket:
+                connection.execute(
+                    """
+                    INSERT INTO TICKET (EventID, OrderID, Type, Price)
+                    VALUES (?, NULL, 'General Admission', ?)
+                    """,
+                    (event_id, price),
+                )
+
+        updated_event = next(item for item in fetch_events({"organizerId": str(organizer["OrganizerID"])}) if item["id"] == event_id)
+        self.send_json({"event": updated_event})
+
+    def handle_organizer_event_delete(self, payload: dict) -> None:
+        event_id = int(payload.get("eventId") or 0)
+
+        if event_id <= 0:
+            raise ValueError("Invalid event id.")
+
+        with connect_db() as connection:
+            organizer = self.organizer_from_payload(connection, payload)
+
+            event = connection.execute(
+                """
+                SELECT EventID, Name
+                FROM EVENT
+                WHERE EventID = ? AND OrganizerID = ?
+                """,
+                (event_id, organizer["OrganizerID"]),
+            ).fetchone()
+
+            if not event:
+                self.send_json(
+                    {"error": "Event not found for this organizer."},
+                    HTTPStatus.NOT_FOUND,
+                )
+                return
+
+            sold_tickets = connection.execute(
+                """
+                SELECT COUNT(*) AS Count
+                FROM TICKET
+                WHERE EventID = ? AND OrderID IS NOT NULL
+                """,
+                (event_id,),
+            ).fetchone()["Count"]
+
+            if sold_tickets > 0:
+                self.send_json(
+                    {"error": "This event already has reservations, so it cannot be deleted."},
+                    HTTPStatus.CONFLICT,
+                )
+                return
+
+            connection.execute("DELETE FROM MUSIC_EVENT WHERE EventID = ?", (event_id,))
+            connection.execute("DELETE FROM SPORTS_EVENT WHERE EventID = ?", (event_id,))
+            connection.execute("DELETE FROM CONFERENCE WHERE EventID = ?", (event_id,))
+            connection.execute("DELETE FROM TICKET WHERE EventID = ?", (event_id,))
+            connection.execute("DELETE FROM EVENT_DATE WHERE EventID = ?", (event_id,))
+            connection.execute("DELETE FROM EVENT WHERE EventID = ?", (event_id,))
+
+        self.send_json({"deleted": True, "eventId": event_id})
+    
     def handle_reserve(self, payload: dict) -> None:
         user_id = int(payload.get("userId") or 0)
         event_id = int(payload.get("eventId") or 0)
@@ -498,7 +696,7 @@ class TixlyHandler(SimpleHTTPRequestHandler):
                     e.Capacity,
                     v.Name AS Venue,
                     v.Location,
-                    MIN(t.Price) AS Price,
+                    COALESCE(MIN(CASE WHEN t.OrderID IS NULL THEN t.Price END), MIN(t.Price), 0) AS Price,
                     SUM(CASE WHEN t.OrderID IS NOT NULL THEN 1 ELSE 0 END) AS TicketsSold
                 FROM EVENT e
                 JOIN VENUE v ON v.VenueID = e.VenueID
