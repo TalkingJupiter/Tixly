@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tixly</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main>
+      <section class="app-shell" id="browse" aria-label="Tixly event browser">
+        <header class="topbar">
+          <a class="logo" href="#browse" aria-label="Tixly home">Tixly</a>
+          <form class="search-pill" id="searchForm">
+            <label>
+              <span>Where</span>
+              <input id="locationInput" type="search" placeholder="Austin, TX" autocomplete="off" />
+            </label>
+            <label>
+              <span>When</span>
+              <input id="dateInput" type="text" placeholder="Any week" autocomplete="off" />
+            </label>
+            <label>
+              <span>Event</span>
+              <input id="eventInput" type="search" placeholder="Music, sports, conference" autocomplete="off" />
+            </label>
+            <button class="search-button" type="submit" aria-label="Search events">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M10.8 18a7.2 7.2 0 1 1 5.1-2.1l4.1 4.1-1.4 1.4-4.1-4.1a7.16 7.16 0 0 1-3.7.7Zm0-2a5.2 5.2 0 1 0 0-10.4 5.2 5.2 0 0 0 0 10.4Z" />
+              </svg>
+            </button>
+          </form>
+          <nav class="header-actions" aria-label="Main navigation">
+            <div class="auth-nav" id="authNav">
+              <button class="link-button" type="button" id="openLoginButton">Log in</button>
+              <button class="nav-register" type="button" id="openSignupButton">Register</button>
+              <button class="link-button" type="button" id="openOrganizerButton">Organizer</button>
+            </div>
+            <div class="session-nav" id="sessionNav">
+              <span id="sessionLabel">Not signed in</span>
+              <button class="link-button" type="button" id="openOrganizerSessionButton">Organizer</button>
+              <button class="link-button" type="button" id="signOutButton">Sign out</button>
+            </div>
+          </nav>
+        </header>
+
+        <div class="category-bar" id="categoryBar" aria-label="Event categories"></div>
+
+        <section class="hero-strip">
+          <div>
+            <span class="eyebrow">Curated discovery</span>
+            <h2>Book the nights worth leaving home for.</h2>
+          </div>
+          <p>
+            Browse live concerts, sports nights, conferences, comedy, and theater with a fast reservation flow.
+          </p>
+        </section>
+
+        <section class="content-grid">
+          <div>
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">Explore</span>
+                <h2>Events in demand</h2>
+              </div>
+              <span class="result-count" id="resultCount"></span>
+            </div>
+            <div class="event-grid" id="eventGrid"></div>
+          </div>
+
+          <aside class="spotlight" aria-label="Featured event">
+            <img id="spotlightImage" alt="" />
+            <div class="spotlight-body">
+              <div>
+                <span class="eyebrow">Featured stay-out-late plan</span>
+                <h3 id="spotlightTitle"></h3>
+              </div>
+              <p id="spotlightMeta"></p>
+              <div class="booking-card">
+                <div>
+                  <span id="spotlightPrice"></span>
+                  <small>per ticket</small>
+                </div>
+                <button type="button" id="reserveButton">Reserve</button>
+              </div>
+            </div>
+          </aside>
+        </section>
+      </section>
+    </main>
+
+    <div class="auth-modal" id="authModal" hidden>
+      <button class="modal-backdrop" type="button" id="closeAuthBackdrop" aria-label="Close authentication form"></button>
+      <section class="auth-panel modal-panel" aria-labelledby="authTitle" aria-modal="true" role="dialog">
+        <button class="close-button" type="button" id="closeAuthButton" aria-label="Close">&times;</button>
+        <div class="brand-mark">Tixly</div>
+        <h2 id="authTitle">Log in</h2>
+        <p id="authSubtitle">Reserve tickets and keep your orders connected to your account.</p>
+        <form class="login-form" id="loginForm">
+          <input id="nameInput" name="username" type="text" placeholder="Name" autocomplete="name" />
+          <input id="emailInput" name="email" type="text" inputmode="email" placeholder="Email" autocomplete="email" required />
+          <input id="passwordInput" name="password" type="password" placeholder="Password" autocomplete="current-password" required />
+          <button class="primary-action" type="submit" id="authSubmitButton">Log in</button>
+          <p class="form-status" id="formStatus" role="status"></p>
+        </form>
+      </section>
+    </div>
+
+    <div class="detail-modal" id="eventDetailModal" hidden>
+      <button class="modal-backdrop" type="button" id="closeDetailBackdrop" aria-label="Close event details"></button>
+      <section class="event-detail-panel" aria-labelledby="detailTitle" aria-modal="true" role="dialog">
+        <button class="close-button light-close" type="button" id="closeDetailButton" aria-label="Close">&times;</button>
+        <h2 id="detailTitle"></h2>
+        <div class="detail-gallery">
+          <img id="detailMainImage" alt="" />
+          <div>
+            <img id="detailSecondImage" alt="" />
+            <img id="detailThirdImage" alt="" />
+          </div>
+        </div>
+        <div class="detail-layout">
+          <article>
+            <h3 id="detailLocation"></h3>
+            <div class="detail-stats" id="detailStats"></div>
+            <h4>Description</h4>
+            <p id="detailDescription"></p>
+          </article>
+          <aside class="detail-booking-card">
+            <strong><span id="detailPrice"></span> <small>for 1 person</small></strong>
+            <label>Date:<select id="detailDate"></select></label>
+            <label>People:<input id="detailGuests" type="number" min="0" max="10" step="1" value="1" /></label>
+            <button type="button" id="detailReserveButton">Reserve</button>
+            <small>You won’t be charged yet</small>
+          </aside>
+        </div>
+      </section>
+    </div>
+
+    <div class="checkout-modal" id="checkoutModal" hidden>
+      <button class="modal-backdrop pale-backdrop" type="button" id="closeCheckoutBackdrop" aria-label="Close checkout"></button>
+      <section class="checkout-panel" aria-labelledby="checkoutTitle" aria-modal="true" role="dialog">
+        <button class="back-button" type="button" id="checkoutBackButton" aria-label="Back">←</button>
+        <button class="close-button light-close" type="button" id="closeCheckoutButton" aria-label="Close">&times;</button>
+        <h2 id="checkoutTitle">Confirm and Pay</h2>
+        <div class="checkout-grid">
+          <div class="checkout-steps">
+            <section class="checkout-step" id="paymentStep">
+              <h3>1. Add a payment method</h3>
+              <label class="payment-option"><input type="radio" name="paymentMethod" value="Credit or debit card" checked /> Credit or debit card</label>
+              <div class="card-fields" id="cardFields">
+                <input id="cardNumberInput" type="text" inputmode="numeric" placeholder="Card number" />
+                <div>
+                  <input id="cardExpiryInput" type="text" placeholder="Expiration" />
+                  <input id="cardCvvInput" type="text" inputmode="numeric" placeholder="CVV" />
+                </div>
+                <input id="cardZipInput" type="text" placeholder="ZIP Code" />
+                <select id="countryInput"><option>United States</option></select>
+              </div>
+              <label class="payment-option"><input type="radio" name="paymentMethod" value="PayPal" /> PayPal</label>
+              <label class="payment-option"><input type="radio" name="paymentMethod" value="Apple Pay" /> Apple Pay</label>
+              <button class="checkout-action" type="button" id="paymentNextButton">Next</button>
+            </section>
+
+            <section class="checkout-step collapsed" id="reviewStep">
+              <h3>2. Review your reservation</h3>
+              <div class="review-body" id="reviewBody"></div>
+              <button class="checkout-action" type="button" id="confirmReservationButton">Confirm</button>
+            </section>
+          </div>
+
+          <aside class="checkout-summary">
+            <div class="summary-event">
+              <img id="summaryImage" alt="" />
+              <h3 id="summaryTitle"></h3>
+            </div>
+            <strong>Free Cancellation</strong>
+            <p>Cancel within 24 hours for a full refund.</p>
+            <dl id="summaryDetails"></dl>
+          </aside>
+        </div>
+        <div class="completion-overlay" id="completionOverlay" hidden>
+          <div class="completion-card">
+            <div class="checkmark">✓</div>
+            <strong>Reservation Completed</strong>
+            <span id="completionTicketNumber"></span>
+            <button type="button" id="seeTicketButton">See your ticket</button>
+            <button type="button" id="backToDashboardButton">Go back to dashboard</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="ticket-modal" id="ticketModal" hidden>
+      <button class="modal-backdrop pale-backdrop" type="button" id="closeTicketBackdrop" aria-label="Close ticket"></button>
+      <section class="ticket-card-modal" aria-label="Ticket">
+        <button class="close-ticket" type="button" id="closeTicketButton" aria-label="Close">&times;</button>
+        <img class="qr-code" id="ticketQrCode" alt="Ticket QR code" />
+        <strong id="ticketEventName"></strong>
+        <span id="ticketVenue"></span>
+        <span id="ticketLocation"></span>
+        <span id="ticketDate"></span>
+        <span id="ticketGuests"></span>
+        <span id="ticketOrder"></span>
+        <b id="ticketHolder"></b>
+        <a href="#browse">See directions</a>
+        <div class="ticket-logo">Tixly</div>
+      </section>
+    </div>
+
+    <div class="organizer-modal" id="organizerModal" hidden>
+      <button class="modal-backdrop pale-backdrop" type="button" id="closeOrganizerBackdrop" aria-label="Close organizer tools"></button>
+      <section class="organizer-panel" aria-labelledby="organizerTitle" aria-modal="true" role="dialog">
+        <button class="close-button light-close" type="button" id="closeOrganizerButton" aria-label="Close">&times;</button>
+        <h2 id="organizerTitle">Organizer Portal</h2>
+
+        <div class="organizer-auth" id="organizerAuth">
+          <div class="organizer-auth-grid">
+            <form class="organizer-form" id="organizerSignupForm">
+              <h3>Create organizer account</h3>
+              <input id="organizerSignupName" type="text" placeholder="Organizer name" required />
+              <input id="organizerSignupEmail" type="text" inputmode="email" placeholder="Email" required />
+              <input id="organizerSignupPassword" type="password" placeholder="Password" required />
+              <button type="submit">Register organizer</button>
+            </form>
+            <form class="organizer-form" id="organizerLoginForm">
+              <h3>Organizer login</h3>
+              <input id="organizerLoginEmail" type="text" inputmode="email" placeholder="Email" required />
+              <input id="organizerLoginPassword" type="password" placeholder="Password" required />
+              <button type="submit">Log in</button>
+            </form>
+          </div>
+        </div>
+
+        <div class="organizer-dashboard" id="organizerDashboard" hidden>
+          <div class="organizer-dashboard-header">
+            <span id="organizerSessionLabel"></span>
+            <button class="link-button" type="button" id="organizerSignOutButton">Sign out</button>
+          </div>
+          <div class="organizer-workspace">
+            <form class="organizer-form" id="venueForm">
+              <h3>Register venue</h3>
+              <input id="venueNameInput" type="text" placeholder="Venue name" required />
+              <input id="venueLocationInput" type="text" placeholder="City, State" required />
+              <input id="venueCapacityInput" type="number" min="1" step="1" placeholder="Capacity" required />
+              <button type="submit">Save venue</button>
+            </form>
+
+            <form class="organizer-form" id="eventForm">
+              <h3>Create event</h3>
+              <input id="eventNameInput" type="text" placeholder="Event name" required />
+              <select id="eventVenueInput" required></select>
+              <select id="eventCategoryInput">
+                <option>Music</option>
+                <option>Sports</option>
+                <option>Conference</option>
+                <option>Comedy</option>
+                <option>Theater</option>
+              </select>
+              <input id="eventDatesInput" type="text" placeholder="Dates: 2026-08-01, 2026-08-02" required />
+              <input id="eventStartTimeInput" type="time" required />
+              <input id="eventPriceInput" type="number" min="1" step="0.01" placeholder="Ticket price" required />
+              <input id="eventCapacityInput" type="number" min="1" step="1" placeholder="Event capacity" required />
+              <input id="eventImageInput" type="url" placeholder="Image URL optional" />
+              <button type="submit">Publish event</button>
+            </form>
+          </div>
+        </div>
+        <p class="organizer-status" id="organizerStatus" role="status"></p>
+      </section>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
