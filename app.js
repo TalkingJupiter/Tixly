@@ -14,6 +14,8 @@ let events = [];
 let selectedEventId = null;
 let currentUser = JSON.parse(localStorage.getItem("tixlyUser") || "null");
 let currentOrganizer = JSON.parse(localStorage.getItem("tixlyOrganizer") || "null");
+let organizerEvents = [];
+let editingEventId = null;
 let authMode = "login";
 let checkoutEvent = null;
 let checkoutGuests = 1;
@@ -538,6 +540,10 @@ document.querySelector("#closeTicketButton").addEventListener("click", closeTick
 document.querySelector("#closeTicketBackdrop").addEventListener("click", closeTicket);
 document.querySelector("#closeOrganizerButton").addEventListener("click", closeOrganizer);
 document.querySelector("#closeOrganizerBackdrop").addEventListener("click", closeOrganizer);
+document.querySelector("#cancelEventEditButton").addEventListener("click", () => {
+  resetEventEditMode();
+  setOrganizerStatus("Edit cancelled.");
+});
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   if (!document.querySelector("#ticketModal").hidden) {
@@ -581,6 +587,7 @@ async function validateSavedOrganizer() {
     localStorage.setItem("tixlyOrganizer", JSON.stringify(currentOrganizer));
     syncOrganizer();
     await loadOrganizerVenues();
+    await loadOrganizerEvents();
   } catch (error) {
     currentOrganizer = null;
     localStorage.removeItem("tixlyOrganizer");
@@ -592,7 +599,10 @@ async function openOrganizer() {
   document.querySelector("#organizerModal").hidden = false;
   document.body.classList.add("modal-open");
   syncOrganizer();
-  if (currentOrganizer) await loadOrganizerVenues();
+  if (currentOrganizer){
+    loadOrganizerVenues();
+    loadOrganizerEvents();
+  }
 }
 
 function closeOrganizer() {
@@ -608,6 +618,7 @@ async function organizerAuth(path, payload) {
     localStorage.setItem("tixlyOrganizer", JSON.stringify(currentOrganizer));
     syncOrganizer();
     await loadOrganizerVenues();
+    await loadOrganizerEvents();
     setOrganizerStatus("Organizer account ready.");
   } catch (error) {
     setOrganizerStatus(error.message, true);
@@ -626,6 +637,118 @@ async function loadOrganizerVenues() {
   } catch (error) {
     select.innerHTML = '<option value="">Could not load venues</option>';
   }
+}
+async function loadOrganizerEvents() {
+  const list = document.querySelector("#organizerEventsList");
+  if (!currentOrganizer || !list) return;
+
+  try {
+    const data = await getJson(`/api/organizers/${currentOrganizer.id}/events`);
+    organizerEvents = data.events || [];
+
+    if (!organizerEvents.length) {
+      list.innerHTML = '<p class="empty-state">You have not published any events yet.</p>';
+      return;
+    }
+
+    list.innerHTML = organizerEvents
+      .map(
+        (event) => `
+          <article class="organizer-event-card">
+            <img src="${event.image}" alt="${event.name}" onerror="this.onerror=null;this.src='${fallbackImage}'" />
+            <div class="organizer-event-info">
+              <h4>${event.name}</h4>
+              <p>${event.date} · ${event.startTime} · ${event.venue}</p>
+              <small>${event.location} · ${event.type}</small>
+              <strong>${moneyText(event.price)} per ticket</strong>
+            </div>
+            <div class="organizer-event-actions">
+              <button class="edit-event-button" type="button" data-edit-event-id="${event.id}">
+                Edit
+              </button>
+              <button class="delete-event-button" type="button" data-delete-event-id="${event.id}">
+                Delete
+              </button>
+            </div>
+          </article>
+        `
+      )
+      .join("");
+
+    list.querySelectorAll("[data-edit-event-id]").forEach((button) => {
+      button.addEventListener("click", () => {
+        startEventEdit(button.dataset.editEventId);
+      });
+    });
+
+    list.querySelectorAll("[data-delete-event-id]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const eventId = Number(button.dataset.deleteEventId);
+        const confirmed = window.confirm("Delete this event? This cannot be undone.");
+
+        if (!confirmed) return;
+
+        try {
+          setOrganizerStatus("Deleting event...");
+
+          await api("/api/organizer/events/delete", {
+            organizerId: currentOrganizer.id,
+            eventId
+          });
+
+          if (editingEventId === eventId) {
+            resetEventEditMode();
+          }
+
+          await loadEvents();
+          await loadOrganizerEvents();
+
+          setOrganizerStatus("Event deleted.");
+        } catch (error) {
+          setOrganizerStatus(error.message, true);
+        }
+      });
+    });
+  } catch (error) {
+    list.innerHTML = `<p class="empty-state">${error.message}</p>`;
+  }
+}
+
+function resetEventEditMode() {
+  editingEventId = null;
+  document.querySelector("#eventForm").reset();
+  document.querySelector("#eventSubmitButton").textContent = "Publish event";
+  document.querySelector("#cancelEventEditButton").hidden = true;
+}
+
+function startEventEdit(eventId) {
+  const event = organizerEvents.find((item) => item.id === Number(eventId));
+
+  if (!event) {
+    setOrganizerStatus("Could not find that event.", true);
+    return;
+  }
+
+  editingEventId = event.id;
+
+  document.querySelector("#eventNameInput").value = event.name;
+  document.querySelector("#eventVenueInput").value = event.venueId;
+  document.querySelector("#eventCategoryInput").value = event.type;
+  document.querySelector("#eventDatesInput").value = (event.availableDates || [event.dateValue]).join(", ");
+  document.querySelector("#eventStartTimeInput").value = event.startTime;
+  document.querySelector("#eventPriceInput").value = event.price;
+  document.querySelector("#eventCapacityInput").value = event.capacity;
+  document.querySelector("#eventImageInput").value = event.image === fallbackImage ? "" : event.image;
+
+  document.querySelector("#eventSubmitButton").textContent = "Save changes";
+  document.querySelector("#cancelEventEditButton").hidden = false;
+
+  document.querySelector("#eventForm").scrollIntoView({
+    behavior: "smooth",
+    block: "start"
+  });
+
+  setOrganizerStatus(`Editing "${event.name}".`);
 }
 
 document.querySelector("#organizerSignupForm").addEventListener("submit", (event) => {
@@ -649,6 +772,10 @@ document.querySelector("#organizerSignOutButton").addEventListener("click", () =
   currentOrganizer = null;
   localStorage.removeItem("tixlyOrganizer");
   syncOrganizer();
+  const list = document.querySelector("#organizerEventsList");
+  if (list) {
+    list.innerHTML = '<p class="empty-state">No organizer events loaded yet.</p>';
+  }
   setOrganizerStatus("Signed out.");
 });
 
@@ -665,6 +792,7 @@ document.querySelector("#venueForm").addEventListener("submit", async (event) =>
     });
     event.target.reset();
     await loadOrganizerVenues();
+    await loadOrganizerEvents();
     setOrganizerStatus("Venue registered.");
   } catch (error) {
     setOrganizerStatus(error.message, true);
@@ -674,23 +802,44 @@ document.querySelector("#venueForm").addEventListener("submit", async (event) =>
 document.querySelector("#eventForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!currentOrganizer) return;
-  const dates = document.querySelector("#eventDatesInput").value.split(",").map((date) => date.trim()).filter(Boolean);
+
+  const dates = document
+    .querySelector("#eventDatesInput")
+    .value
+    .split(",")
+    .map((date) => date.trim())
+    .filter(Boolean);
+
+  const payload = {
+    organizerId: currentOrganizer.id,
+    name: document.querySelector("#eventNameInput").value.trim(),
+    venueId: document.querySelector("#eventVenueInput").value,
+    category: document.querySelector("#eventCategoryInput").value,
+    dates,
+    startTime: document.querySelector("#eventStartTimeInput").value,
+    price: document.querySelector("#eventPriceInput").value,
+    capacity: document.querySelector("#eventCapacityInput").value,
+    imageUrl: document.querySelector("#eventImageInput").value.trim()
+  };
+
+  if (editingEventId) {
+    payload.eventId = editingEventId;
+  }
+
   try {
-    setOrganizerStatus("Publishing event...");
-    await api("/api/organizer/events", {
-      organizerId: currentOrganizer.id,
-      name: document.querySelector("#eventNameInput").value.trim(),
-      venueId: document.querySelector("#eventVenueInput").value,
-      category: document.querySelector("#eventCategoryInput").value,
-      dates,
-      startTime: document.querySelector("#eventStartTimeInput").value,
-      price: document.querySelector("#eventPriceInput").value,
-      capacity: document.querySelector("#eventCapacityInput").value,
-      imageUrl: document.querySelector("#eventImageInput").value.trim()
-    });
-    event.target.reset();
+    setOrganizerStatus(editingEventId ? "Saving event changes..." : "Publishing event...");
+
+    await api(
+      editingEventId ? "/api/organizer/events/update" : "/api/organizer/events",
+      payload
+    );
+
+    resetEventEditMode();
     await loadEvents();
-    setOrganizerStatus("Event published and added to the homepage.");
+    await loadOrganizerVenues();
+    await loadOrganizerEvents();
+
+    setOrganizerStatus(editingEventId ? "Event updated." : "Event published and added to the homepage.");
   } catch (error) {
     setOrganizerStatus(error.message, true);
   }
