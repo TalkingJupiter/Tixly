@@ -61,6 +61,26 @@ function setStatus(message, isError = false) {
   status.style.color = isError ? "#ffd7df" : "rgba(255, 255, 255, 0.84)";
 }
 
+function setProfileStatus(message, isError = false) {
+  const status = document.querySelector("#profileStatus");
+  status.textContent = message;
+  status.style.color = isError ? "var(--accent-dark)" : "var(--muted)";
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[character]);
+}
+
+function showProfile(isVisible = true){
+  document.querySelector("#openUserProfileButton").hidden = !isVisible;
+}
+
 function showToast(message) {
   const existing = document.querySelector(".toast");
   if (existing) existing.remove();
@@ -95,21 +115,23 @@ function moneyText(value) {
 }
 
 function syncSession() {
-  const label = document.querySelector("#sessionLabel");
+  // const label = document.querySelector("#sessionLabel");
   const authNav = document.querySelector("#authNav");
   const sessionNav = document.querySelector("#sessionNav");
   const signOut = document.querySelector("#signOutButton");
 
   if (currentUser) {
-    label.textContent = `Signed in as ${currentUser.username}`;
+    // label.textContent = `Signed in as ${currentUser.username}`;
     authNav.hidden = true;
     sessionNav.hidden = false;
     signOut.hidden = false;
+    showProfile(true);
   } else {
-    label.textContent = "Not signed in";
+    // label.textContent = "Not signed in";
     authNav.hidden = false;
     sessionNav.hidden = true;
     signOut.hidden = true;
+    showProfile(false);
   }
 }
 
@@ -221,13 +243,10 @@ function renderEvents() {
       const percentSold = Math.round((event.sold / event.capacity) * 100);
       return `
         <article class="event-card">
-          <button type="button" data-event-id="${event.id}">
+          <button class="event-card-button" type="button" data-event-id="${event.id}">
             <div class="image-wrap">
               <img src="${event.image}" alt="${event.name} at ${event.venue}" loading="lazy" style="object-position: ${event.imagePosition}" onerror="this.onerror=null;this.src='${fallbackImage}'" />
               <span class="badge">${percentSold}% sold</span>
-              <span class="heart" aria-hidden="true">
-                <svg viewBox="0 0 24 24"><path d="M12 20s-7-4.35-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.65-7 10-7 10Z" /></svg>
-              </span>
             </div>
             <div class="event-copy">
               <div class="event-title-row">
@@ -246,9 +265,7 @@ function renderEvents() {
 
   grid.querySelectorAll("[data-event-id]").forEach((button) => {
     button.addEventListener("click", () => {
-      const eventId = Number(button.dataset.eventId);
-      renderSpotlight(eventId);
-      openEventDetail(eventId);
+      renderSpotlight(Number(button.dataset.eventId));
     });
   });
 
@@ -418,10 +435,10 @@ function openTicket(ticket) {
   document.querySelector("#ticketEventName").textContent = lastTicket.eventName;
   document.querySelector("#ticketVenue").textContent = lastTicket.venue;
   document.querySelector("#ticketLocation").textContent = lastTicket.location;
-  document.querySelector("#ticketDate").textContent = checkoutDate;
+  document.querySelector("#ticketDate").textContent = lastTicket.eventDate || checkoutDate;
   document.querySelector("#ticketGuests").textContent = `${lastTicket.guestCount} ${lastTicket.guestCount === 1 ? "guest" : "guests"}`;
   document.querySelector("#ticketOrder").textContent = `Order #${lastTicket.orderId}`;
-  document.querySelector("#ticketHolder").textContent = `${currentUser.username} - Adult`;
+  document.querySelector("#ticketHolder").textContent = `${lastTicket.holder || currentUser.username} - Adult`;
   document.querySelector("#ticketModal").hidden = false;
   document.body.classList.add("modal-open");
 }
@@ -453,6 +470,39 @@ document.querySelector("#loginForm").addEventListener("submit", async (event) =>
   }
 });
 
+document.querySelector("#userProfileForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!currentUser) {
+    closeUserProfile();
+    openAuth("login");
+    return;
+  }
+
+  try {
+    setProfileStatus("Saving changes...");
+    const data = await api("/api/users/update", {
+      userId: currentUser.id,
+      username: document.querySelector("#profileNameInput").value.trim(),
+      password: document.querySelector("#profilePasswordInput").value
+    });
+    currentUser = data.user;
+    localStorage.setItem("tixlyUser", JSON.stringify(currentUser));
+    syncSession();
+    renderUserDashboard(data);
+    setProfileStatus("Profile updated.");
+    showToast("Profile updated.");
+  } catch (error) {
+    if (error.status === 401 || error.status === 404) {
+      closeUserProfile();
+      clearSession();
+      showToast("Your saved login expired. Please log in again.");
+      openAuth("login");
+      return;
+    }
+    setProfileStatus(error.message, true);
+  }
+});
+
 document.querySelector("#searchForm").addEventListener("submit", (event) => {
   event.preventDefault();
   renderEvents();
@@ -463,7 +513,7 @@ document.querySelector("#searchForm").addEventListener("submit", (event) => {
 });
 
 document.querySelector("#reserveButton").addEventListener("click", () => {
-  openCheckout(selectedEventId);
+  openEventDetail(selectedEventId);
 });
 
 document.querySelector("#detailReserveButton").addEventListener("click", () => {
@@ -498,7 +548,9 @@ document.querySelector("#confirmReservationButton").addEventListener("click", as
       eventName: data.eventName,
       venue: checkoutEvent.venue,
       location: checkoutEvent.location,
+      eventDate: checkoutDate,
       guestCount: data.guestCount || checkoutGuests,
+      holder: currentUser.username,
       qrPayload: data.qrPayload,
       qrDataUrl: data.qrDataUrl
     };
@@ -525,17 +577,23 @@ document.querySelector("#signOutButton").addEventListener("click", () => {
 
 document.querySelector("#openLoginButton").addEventListener("click", () => openAuth("login"));
 document.querySelector("#openSignupButton").addEventListener("click", () => openAuth("signup"));
+document.querySelector("#openUserProfileButton").addEventListener("click", openUserProfile);
 document.querySelector("#openOrganizerButton").addEventListener("click", openOrganizer);
 document.querySelector("#openOrganizerSessionButton").addEventListener("click", openOrganizer);
 document.querySelector("#closeAuthButton").addEventListener("click", closeAuth);
 document.querySelector("#closeAuthBackdrop").addEventListener("click", closeAuth);
+document.querySelector("#closeUserButton").addEventListener("click", closeUserProfile);
+document.querySelector("#closeUserBackdrop").addEventListener("click", closeUserProfile);
 document.querySelector("#closeDetailButton").addEventListener("click", closeEventDetail);
 document.querySelector("#closeDetailBackdrop").addEventListener("click", closeEventDetail);
 document.querySelector("#closeCheckoutButton").addEventListener("click", closeCheckout);
 document.querySelector("#closeCheckoutBackdrop").addEventListener("click", closeCheckout);
 document.querySelector("#checkoutBackButton").addEventListener("click", closeCheckout);
 document.querySelector("#seeTicketButton").addEventListener("click", () => openTicket(lastTicket));
-document.querySelector("#backToDashboardButton").addEventListener("click", closeCheckout);
+document.querySelector("#backToDashboardButton").addEventListener("click", async () => {
+  closeCheckout();
+  await openUserProfile();
+});
 document.querySelector("#closeTicketButton").addEventListener("click", closeTicket);
 document.querySelector("#closeTicketBackdrop").addEventListener("click", closeTicket);
 document.querySelector("#closeOrganizerButton").addEventListener("click", closeOrganizer);
@@ -556,6 +614,8 @@ document.addEventListener("keydown", (event) => {
     closeEventDetail();
   } else if (!document.querySelector("#authModal").hidden) {
     closeAuth();
+  } else if(!document.querySelector("#userModal").hidden){
+    closeUserProfile();
   }
 });
 
@@ -592,6 +652,104 @@ async function validateSavedOrganizer() {
     currentOrganizer = null;
     localStorage.removeItem("tixlyOrganizer");
     syncOrganizer();
+  }
+}
+
+function renderUserDashboard(data) {
+  const user = data.user || currentUser;
+  const reservations = data.reservations || [];
+
+  document.querySelector("#profileSessionLabel").textContent = user.createdAt
+    ? `Member since ${String(user.createdAt).slice(0, 10)}`
+    : "";
+  document.querySelector("#profileNameInput").value = user.username || "";
+  document.querySelector("#profileEmailInput").value = user.email || "";
+  document.querySelector("#profilePasswordInput").value = "";
+  document.querySelector("#profileReservationCount").textContent =
+    `${reservations.length} order${reservations.length === 1 ? "" : "s"}`;
+
+  const list = document.querySelector("#profileReservationsList");
+  if (!reservations.length) {
+    list.innerHTML = '<p class="empty-state">No reservations yet.</p>';
+    return;
+  }
+
+  list.innerHTML = reservations
+    .map(
+      (reservation) => `
+        <button class="profile-reservation-card" type="button" data-reservation-id="${reservation.id}" aria-label="Open ticket for ${escapeHtml(reservation.event)}">
+          <div>
+            <h4>${escapeHtml(reservation.event)}</h4>
+            <p>${escapeHtml(reservation.venue)} · ${escapeHtml(reservation.location)}</p>
+            <small>${escapeHtml(reservation.eventDate || "Date pending")} · ${reservation.tickets} ${reservation.tickets === 1 ? "ticket" : "tickets"}</small>
+          </div>
+          <div>
+            <strong>${moneyText(reservation.total || 0)}</strong>
+            <span>${escapeHtml(reservation.status || "Confirmed")}</span>
+            <small>Order #${reservation.id}</small>
+          </div>
+        </button>
+      `
+    )
+    .join("");
+
+  list.querySelectorAll("[data-reservation-id]").forEach((button) => {
+    button.addEventListener("click", () => openReservationTicket(button.dataset.reservationId));
+  });
+}
+
+async function openUserProfile(){
+  if (!currentUser) {
+    openAuth("login");
+    return;
+  }
+
+  document.querySelector("#userModal").hidden = false;
+  document.body.classList.add("modal-open");
+  setProfileStatus("Loading your dashboard...");
+
+  try {
+    const data = await getJson(`/api/users/${currentUser.id}`);
+    currentUser = data.user;
+    localStorage.setItem("tixlyUser", JSON.stringify(currentUser));
+    syncSession();
+    renderUserDashboard(data);
+    setProfileStatus("");
+  } catch (error) {
+    if (error.status === 401 || error.status === 404) {
+      closeUserProfile();
+      clearSession();
+      showToast("Your saved login expired. Please log in again.");
+      openAuth("login");
+      return;
+    }
+    setProfileStatus(error.message, true);
+  }
+}
+
+function closeUserProfile(){
+  document.querySelector("#userModal").hidden = true;
+  document.body.classList.remove("modal-open");
+}
+
+async function openReservationTicket(orderId) {
+  if (!currentUser) {
+    openAuth("login");
+    return;
+  }
+
+  try {
+    setProfileStatus("Loading ticket...");
+    const data = await getJson(`/api/users/${currentUser.id}/reservations/${orderId}`);
+    setProfileStatus("");
+    openTicket(data.ticket);
+  } catch (error) {
+    if (error.status === 401 || error.status === 404) {
+      showToast("Could not find that reservation for this account.");
+      await openUserProfile();
+      return;
+    }
+    setProfileStatus(error.message, true);
   }
 }
 
@@ -654,17 +812,19 @@ async function loadOrganizerEvents() {
     list.innerHTML = organizerEvents
       .map(
         (event) => `
-          <article class="organizer-event-card">
-            <img src="${event.image}" alt="${event.name}" onerror="this.onerror=null;this.src='${fallbackImage}'" />
-            <div class="organizer-event-info">
-              <h4>${event.name}</h4>
-              <p>${event.date} · ${event.startTime} · ${event.venue}</p>
-              <small>${event.location} · ${event.type}</small>
-              <strong>${moneyText(event.price)} per ticket</strong>
-            </div>
+          <article class="organizer-event-card ${editingEventId === event.id ? "active" : ""}">
+            <button class="organizer-event-main" type="button" data-open-event-id="${event.id}">
+              <img src="${event.image}" alt="${event.name}" onerror="this.onerror=null;this.src='${fallbackImage}'" />
+              <div class="organizer-event-info">
+                <h4>${event.name}</h4>
+                <p>${event.date} · ${event.startTime} · ${event.venue}</p>
+                <small>${event.location} · ${event.type}</small>
+                <strong>${moneyText(event.price)} per ticket</strong>
+              </div>
+            </button>
             <div class="organizer-event-actions">
               <button class="edit-event-button" type="button" data-edit-event-id="${event.id}">
-                Edit
+                Open
               </button>
               <button class="delete-event-button" type="button" data-delete-event-id="${event.id}">
                 Delete
@@ -674,6 +834,12 @@ async function loadOrganizerEvents() {
         `
       )
       .join("");
+
+    list.querySelectorAll("[data-open-event-id]").forEach((button) => {
+      button.addEventListener("click", () => {
+        startEventEdit(button.dataset.openEventId);
+      });
+    });
 
     list.querySelectorAll("[data-edit-event-id]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -714,14 +880,82 @@ async function loadOrganizerEvents() {
   }
 }
 
+async function loadOrganizerEventAnalytics(eventId) {
+  const panel = document.querySelector("#eventAnalyticsPanel");
+  panel.hidden = false;
+  document.querySelector("#analyticsEventTitle").textContent = "Loading analytics...";
+  document.querySelector("#analyticsSellThrough").textContent = "";
+  document.querySelector("#analyticsMetrics").innerHTML = "";
+  document.querySelector("#analyticsDateList").innerHTML = "";
+  document.querySelector("#analyticsOrderList").innerHTML = "";
+
+  try {
+    const data = await getJson(`/api/organizers/${currentOrganizer.id}/events/${eventId}/analytics`);
+    const analytics = data.analytics;
+    const summary = analytics.summary;
+
+    document.querySelector("#analyticsEventTitle").textContent = analytics.event.name;
+    document.querySelector("#analyticsSellThrough").textContent = `${summary.sellThrough}% sold`;
+    document.querySelector("#analyticsMetrics").innerHTML = `
+      <div><strong>${summary.ticketsSold}</strong><span>Tickets sold</span></div>
+      <div><strong>${summary.remaining}</strong><span>Remaining</span></div>
+      <div><strong>${summary.orders}</strong><span>Orders</span></div>
+      <div><strong>${moneyText(summary.paymentRevenue)}</strong><span>Total revenue</span></div>
+      <div><strong>${moneyText(summary.ticketRevenue)}</strong><span>Ticket sales</span></div>
+      <div><strong>${moneyText(summary.averageOrder)}</strong><span>Avg order</span></div>
+    `;
+
+    const dateList = document.querySelector("#analyticsDateList");
+    dateList.innerHTML = analytics.byDate.length
+      ? analytics.byDate
+          .map(
+            (row) => `
+              <div class="analytics-row">
+                <span>${escapeHtml(row.date)}</span>
+                <strong>${row.ticketsSold} tickets</strong>
+                <small>${moneyText(row.revenue)}</small>
+              </div>
+            `
+          )
+          .join("")
+      : '<p class="empty-state">No reservations for this event yet.</p>';
+
+    const orderList = document.querySelector("#analyticsOrderList");
+    orderList.innerHTML = analytics.recentOrders.length
+      ? analytics.recentOrders
+          .map(
+            (order) => `
+              <div class="analytics-row">
+                <span>#${order.id} · ${escapeHtml(order.buyer)}</span>
+                <strong>${order.tickets} ${order.tickets === 1 ? "ticket" : "tickets"}</strong>
+                <small>${escapeHtml(order.eventDate || "Date pending")} · ${moneyText(order.total)}</small>
+              </div>
+            `
+          )
+          .join("")
+      : '<p class="empty-state">No orders yet.</p>';
+
+    setOrganizerStatus(`Editing "${analytics.event.name}".`);
+  } catch (error) {
+    document.querySelector("#analyticsEventTitle").textContent = "Analytics unavailable";
+    document.querySelector("#analyticsMetrics").innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+    setOrganizerStatus(error.message, true);
+  }
+}
+
 function resetEventEditMode() {
   editingEventId = null;
   document.querySelector("#eventForm").reset();
+  document.querySelector("#eventFormTitle").textContent = "Create event";
   document.querySelector("#eventSubmitButton").textContent = "Publish event";
   document.querySelector("#cancelEventEditButton").hidden = true;
+  document.querySelector("#eventAnalyticsPanel").hidden = true;
+  document.querySelectorAll(".organizer-event-card.active").forEach((card) => {
+    card.classList.remove("active");
+  });
 }
 
-function startEventEdit(eventId) {
+async function startEventEdit(eventId) {
   const event = organizerEvents.find((item) => item.id === Number(eventId));
 
   if (!event) {
@@ -731,6 +965,7 @@ function startEventEdit(eventId) {
 
   editingEventId = event.id;
 
+  document.querySelector("#eventFormTitle").textContent = "Edit event";
   document.querySelector("#eventNameInput").value = event.name;
   document.querySelector("#eventVenueInput").value = event.venueId;
   document.querySelector("#eventCategoryInput").value = event.type;
@@ -742,13 +977,20 @@ function startEventEdit(eventId) {
 
   document.querySelector("#eventSubmitButton").textContent = "Save changes";
   document.querySelector("#cancelEventEditButton").hidden = false;
+  document.querySelectorAll(".organizer-event-card").forEach((card) => {
+    card.classList.toggle(
+      "active",
+      card.querySelector("[data-open-event-id]")?.dataset.openEventId === String(event.id)
+    );
+  });
 
-  document.querySelector("#eventForm").scrollIntoView({
+  document.querySelector(".event-management-panel").scrollIntoView({
     behavior: "smooth",
     block: "start"
   });
 
-  setOrganizerStatus(`Editing "${event.name}".`);
+  setOrganizerStatus(`Editing "${event.name}" and loading analytics.`);
+  await loadOrganizerEventAnalytics(event.id);
 }
 
 document.querySelector("#organizerSignupForm").addEventListener("submit", (event) => {

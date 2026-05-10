@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
+import os
 import secrets
 import sqlite3
 import subprocess
@@ -16,6 +18,21 @@ ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT / "data" / "tixly.db"
 SCHEMA_PATH = ROOT / "schema.sql"
 QR_SCRIPT_PATH = ROOT / "tools" / "make_qr.swift"
+
+QR_DATA_CODEWORDS = {
+    1: 19,
+    2: 34,
+    3: 55,
+    4: 80,
+    5: 108,
+}
+QR_ECC_CODEWORDS = {
+    1: 7,
+    2: 10,
+    3: 15,
+    4: 20,
+    5: 26,
+}
 
 
 def connect_db() -> sqlite3.Connection:
@@ -37,6 +54,11 @@ def table_columns(connection: sqlite3.Connection, table: str) -> set[str]:
 
 
 def migrate_db(connection: sqlite3.Connection) -> None:
+    user_columns = table_columns(connection, "USER")
+    if "CreatedAt" not in user_columns:
+        connection.execute("ALTER TABLE USER ADD COLUMN CreatedAt TEXT")
+        connection.execute("UPDATE USER SET CreatedAt = CURRENT_TIMESTAMP WHERE CreatedAt IS NULL")
+
     organizer_columns = table_columns(connection, "ORGANIZER")
     if "PasswordSalt" not in organizer_columns:
         connection.execute("ALTER TABLE ORGANIZER ADD COLUMN PasswordSalt TEXT")
@@ -74,8 +96,333 @@ def hash_password(password: str, salt: str | None = None) -> tuple[str, str]:
     return salt, digest
 
 
+def qr_compact_payload(payload: dict) -> str:
+    compact = {
+        "o": payload.get("orderId"),
+        "t": payload.get("ticketIds", []),
+        "e": payload.get("event"),
+        "d": payload.get("date"),
+        "n": payload.get("guestCount"),
+    }
+    return json.dumps(compact, separators=(",", ":"), sort_keys=True)
+
+
+def gf_multiply(left: int, right: int) -> int:
+    result = 0
+    while right:
+        if right & 1:
+            result ^= left
+        left <<= 1
+        if left & 0x100:
+            left ^= 0x11D
+        right >>= 1
+    return result
+
+
+def gf_pow(value: int, power: int) -> int:
+    result = 1
+    for _ in range(power):
+        result = gf_multiply(result, value)
+    return result
+
+
+def rs_generator(degree: int) -> list[int]:
+    coefficients = [1]
+    for i in range(degree):
+        next_coefficients = [0] * (len(coefficients) + 1)
+        root = gf_pow(2, i)
+        for index, coefficient in enumerate(coefficients):
+            next_coefficients[index] ^= gf_multiply(coefficient, root)
+            next_coefficients[index + 1] ^= coefficient
+        coefficients = next_coefficients
+    return coefficients[1:]
+
+
+def rs_remainder(data: list[int], degree: int) -> list[int]:
+    generator = rs_generator(degree)
+    result = [0] * degree
+    for value in data:
+        factor = value ^ result.pop(0)
+        result.append(0)
+        for index, coefficient in enumerate(generator):
+            result[index] ^= gf_multiply(coefficient, factor)
+    return result
+
+
+def append_bits(bits: list[int], value: int, length: int) -> None:
+    for shift in range(length - 1, -1, -1):
+        bits.append((value >> shift) & 1)
+
+
+def qr_format_bits(mask: int) -> int:
+    data = (1 << 3) | mask
+    value = data << 10
+    generator = 0x537
+    for shift in range(14, 9, -1):
+        if (value >> shift) & 1:
+            value ^= generator << (shift - 10)
+    return ((data << 10) | value) ^ 0x5412
+
+
+def make_svg_qr(payload_text: str) -> str | None:
+    data = payload_text.encode("utf-8")
+    version = next(
+        (
+            candidate
+            for candidate, capacity in QR_DATA_CODEWORDS.items()
+            if len(data) <= capacity - 2
+        ),
+        None,
+    )
+    if not version:
+        return None
+
+    data_codewords = QR_DATA_CODEWORDS[version]
+    ecc_codewords = QR_ECC_CODEWORDS[version]
+    bits: list[int] = []
+    append_bits(bits, 0b0100, 4)
+    append_bits(bits, len(data), 8)
+    for byte in data:
+        append_bits(bits, byte, 8)
+    append_bits(bits, 0, min(4, data_codewords * 8 - len(bits)))
+    while len(bits) % 8:
+        bits.append(0)
+
+    codewords = [
+        sum(bits[index + shift] << (7 - shift) for shift in range(8))
+        for index in range(0, len(bits), 8)
+    ]
+    pad = 0xEC
+    while len(codewords) < data_codewords:
+        codewords.append(pad)
+        pad = 0x11 if pad == 0xEC else 0xEC
+
+    codewords.extend(rs_remainder(codewords, ecc_codewords))
+    size = version * 4 + 17
+    modules = [[False] * size for _ in range(size)]
+    reserved = [[False] * size for _ in range(size)]
+
+    def set_module(row: int, column: int, value: bool, is_reserved: bool = True) -> None:
+        if 0 <= row < size and 0 <= column < size:
+            modules[row][column] = value
+            if is_reserved:
+                reserved[row][column] = True
+
+    def draw_finder(row: int, column: int) -> None:
+        for y in range(-1, 8):
+            for x in range(-1, 8):
+                distance = max(abs(x - 3), abs(y - 3))
+                set_module(row + y, column + x, distance in (0, 1, 3))
+
+    draw_finder(0, 0)
+    draw_finder(0, size - 7)
+    draw_finder(size - 7, 0)
+
+    for index in range(8, size - 8):
+        value = index % 2 == 0
+        set_module(6, index, value)
+        set_module(index, 6, value)
+
+    if version >= 2:
+        alignment = 4 * version + 10
+        for y in range(-2, 3):
+            for x in range(-2, 3):
+                distance = max(abs(x), abs(y))
+                set_module(alignment + y, alignment + x, distance != 1)
+
+    set_module(size - 8, 8, True)
+
+    data_bits: list[int] = []
+    for codeword in codewords:
+        append_bits(data_bits, codeword, 8)
+
+    bit_index = 0
+    column = size - 1
+    upward = True
+    while column > 0:
+        if column == 6:
+            column -= 1
+        rows = range(size - 1, -1, -1) if upward else range(size)
+        for row in rows:
+            for offset in range(2):
+                current_column = column - offset
+                if reserved[row][current_column]:
+                    continue
+                bit = data_bits[bit_index] if bit_index < len(data_bits) else 0
+                if (row + current_column) % 2 == 0:
+                    bit ^= 1
+                set_module(row, current_column, bit == 1, False)
+                bit_index += 1
+        upward = not upward
+        column -= 2
+
+    format_bits = qr_format_bits(0)
+    for index in range(15):
+        value = ((format_bits >> index) & 1) == 1
+        if index < 6:
+            set_module(8, index, value)
+        elif index == 6:
+            set_module(8, 7, value)
+        elif index == 7:
+            set_module(8, 8, value)
+        elif index == 8:
+            set_module(7, 8, value)
+        else:
+            set_module(14 - index, 8, value)
+
+        if index < 8:
+            set_module(size - 1 - index, 8, value)
+        else:
+            set_module(8, size - 15 + index, value)
+
+    scale = 8
+    quiet = 4
+    view_size = (size + quiet * 2) * scale
+    squares = []
+    for row in range(size):
+        for column in range(size):
+            if modules[row][column]:
+                squares.append(
+                    f'<rect x="{(column + quiet) * scale}" y="{(row + quiet) * scale}" width="{scale}" height="{scale}"/>'
+                )
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {view_size} {view_size}" '
+        f'shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/>'
+        f'<g fill="#000">{"".join(squares)}</g></svg>'
+    )
+
+
 def public_user(row: sqlite3.Row) -> dict:
-    return {"id": row["UserID"], "username": row["Username"], "email": row["Email"]}
+    return {
+        "id": row["UserID"],
+        "username": row["Username"],
+        "email": row["Email"],
+        "createdAt": row["CreatedAt"],
+    }
+
+
+def user_reservations(connection: sqlite3.Connection, user_id: int) -> list[dict]:
+    rows = connection.execute(
+        """
+        SELECT
+            ord.OrderID,
+            ord.OrderDate,
+            ord.EventDate,
+            ord.TotalPrice,
+            ord.Status,
+            e.Name AS Event,
+            v.Name AS Venue,
+            v.Location,
+            COUNT(t.TicketID) AS TicketCount
+        FROM "ORDER" ord
+        JOIN TICKET t ON t.OrderID = ord.OrderID
+        JOIN EVENT e ON e.EventID = t.EventID
+        JOIN VENUE v ON v.VenueID = e.VenueID
+        WHERE ord.UserID = ?
+        GROUP BY ord.OrderID
+        ORDER BY ord.OrderID DESC
+        """,
+        (user_id,),
+    )
+    return [
+        {
+            "id": row["OrderID"],
+            "event": row["Event"],
+            "venue": row["Venue"],
+            "location": row["Location"],
+            "eventDate": row["EventDate"],
+            "orderDate": row["OrderDate"],
+            "total": row["TotalPrice"],
+            "status": row["Status"],
+            "tickets": row["TicketCount"],
+        }
+        for row in rows
+    ]
+
+
+def ticket_details_for_order(
+    connection: sqlite3.Connection, user_id: int, order_id: int
+) -> dict | None:
+    order = connection.execute(
+        """
+        SELECT
+            ord.OrderID,
+            ord.OrderDate,
+            ord.EventDate,
+            ord.TotalPrice,
+            ord.Status,
+            u.UserID,
+            u.Username,
+            e.EventID,
+            e.Name AS Event,
+            v.Name AS Venue,
+            v.Location,
+            p.Method AS PaymentMethod
+        FROM "ORDER" ord
+        LEFT JOIN USER u ON u.UserID = ord.UserID
+        JOIN TICKET t ON t.OrderID = ord.OrderID
+        JOIN EVENT e ON e.EventID = t.EventID
+        JOIN VENUE v ON v.VenueID = e.VenueID
+        LEFT JOIN PAYMENT p ON p.OrderID = ord.OrderID
+        WHERE ord.UserID = ? AND ord.OrderID = ?
+        GROUP BY ord.OrderID
+        """,
+        (user_id, order_id),
+    ).fetchone()
+
+    if not order:
+        return None
+
+    ticket_rows = connection.execute(
+        """
+        SELECT TicketID, Price
+        FROM TICKET
+        WHERE OrderID = ?
+        ORDER BY TicketID
+        """,
+        (order_id,),
+    ).fetchall()
+    ticket_ids = [row["TicketID"] for row in ticket_rows]
+    subtotal = sum(float(row["Price"]) for row in ticket_rows)
+    total = float(order["TotalPrice"] or 0)
+    taxes = round(total - subtotal, 2)
+    payload = {
+        "type": "TixlyTicket",
+        "orderId": order["OrderID"],
+        "ticketIds": ticket_ids,
+        "event": order["Event"],
+        "venue": order["Venue"],
+        "location": order["Location"],
+        "date": order["EventDate"],
+        "guestCount": len(ticket_ids),
+        "buyerUserId": order["UserID"],
+        "paymentMethod": order["PaymentMethod"] or "Card",
+        "subtotal": subtotal,
+        "taxes": taxes,
+        "total": total,
+    }
+
+    return {
+        "ticket": {
+            "ticketId": ticket_ids[0] if ticket_ids else order["OrderID"],
+            "ticketIds": ticket_ids,
+            "orderId": order["OrderID"],
+            "eventName": order["Event"],
+            "venue": order["Venue"],
+            "location": order["Location"],
+            "eventDate": order["EventDate"],
+            "orderDate": order["OrderDate"],
+            "guestCount": len(ticket_ids),
+            "holder": order["Username"],
+            "status": order["Status"],
+            "subtotal": subtotal,
+            "taxes": taxes,
+            "total": total,
+            "paymentMethod": order["PaymentMethod"] or "Card",
+            "qrPayload": payload,
+            "qrDataUrl": make_qr_data_url(payload),
+        }
+    }
 
 
 def public_organizer(row: sqlite3.Row) -> dict:
@@ -162,21 +509,160 @@ def fetch_events(filters: dict[str, str] | None = None) -> list[dict]:
         return [event_from_row(row) for row in connection.execute(query, params)]
 
 
+def organizer_event_analytics(
+    connection: sqlite3.Connection, organizer_id: int, event_id: int
+) -> dict | None:
+    event = connection.execute(
+        """
+        SELECT
+            e.EventID,
+            e.Name,
+            e.Capacity,
+            e.Category,
+            e.Date,
+            e.StartTime,
+            v.Name AS Venue,
+            v.Location
+        FROM EVENT e
+        JOIN VENUE v ON v.VenueID = e.VenueID
+        WHERE e.EventID = ? AND e.OrganizerID = ?
+        """,
+        (event_id, organizer_id),
+    ).fetchone()
+
+    if not event:
+        return None
+
+    totals = connection.execute(
+        """
+        WITH event_orders AS (
+            SELECT
+                ord.OrderID,
+                ord.TotalPrice,
+                COUNT(t.TicketID) AS TicketsSold,
+                SUM(t.Price) AS TicketRevenue
+            FROM "ORDER" ord
+            JOIN TICKET t ON t.OrderID = ord.OrderID
+            WHERE t.EventID = ?
+            GROUP BY ord.OrderID
+        )
+        SELECT
+            COALESCE(SUM(TicketsSold), 0) AS TicketsSold,
+            COUNT(OrderID) AS Orders,
+            COALESCE(SUM(TicketRevenue), 0) AS TicketRevenue,
+            COALESCE(SUM(TotalPrice), 0) AS PaymentRevenue
+        FROM event_orders
+        """,
+        (event_id,),
+    ).fetchone()
+
+    date_rows = connection.execute(
+        """
+        SELECT
+            ord.EventDate,
+            COUNT(t.TicketID) AS TicketsSold,
+            COUNT(DISTINCT ord.OrderID) AS Orders,
+            COALESCE(SUM(t.Price), 0) AS Revenue
+        FROM TICKET t
+        JOIN "ORDER" ord ON ord.OrderID = t.OrderID
+        WHERE t.EventID = ?
+        GROUP BY ord.EventDate
+        ORDER BY ord.EventDate
+        """,
+        (event_id,),
+    ).fetchall()
+
+    recent_rows = connection.execute(
+        """
+        SELECT
+            ord.OrderID,
+            ord.EventDate,
+            ord.TotalPrice,
+            ord.Status,
+            u.Username,
+            COUNT(t.TicketID) AS Tickets
+        FROM "ORDER" ord
+        LEFT JOIN USER u ON u.UserID = ord.UserID
+        JOIN TICKET t ON t.OrderID = ord.OrderID
+        WHERE t.EventID = ?
+        GROUP BY ord.OrderID
+        ORDER BY ord.OrderID DESC
+        LIMIT 8
+        """,
+        (event_id,),
+    ).fetchall()
+
+    tickets_sold = totals["TicketsSold"] or 0
+    orders = totals["Orders"] or 0
+    capacity = event["Capacity"] or 0
+    return {
+        "event": {
+            "id": event["EventID"],
+            "name": event["Name"],
+            "category": event["Category"],
+            "venue": event["Venue"],
+            "location": event["Location"],
+            "date": event["Date"],
+            "startTime": event["StartTime"],
+            "capacity": capacity,
+        },
+        "summary": {
+            "ticketsSold": tickets_sold,
+            "orders": orders,
+            "remaining": max(capacity - tickets_sold, 0),
+            "sellThrough": round((tickets_sold / capacity) * 100, 1) if capacity else 0,
+            "ticketRevenue": float(totals["TicketRevenue"] or 0),
+            "paymentRevenue": float(totals["PaymentRevenue"] or 0),
+            "averageOrder": round(float(totals["PaymentRevenue"] or 0) / orders, 2) if orders else 0,
+        },
+        "byDate": [
+            {
+                "date": row["EventDate"] or "Unassigned",
+                "ticketsSold": row["TicketsSold"],
+                "orders": row["Orders"],
+                "revenue": float(row["Revenue"] or 0),
+            }
+            for row in date_rows
+        ],
+        "recentOrders": [
+            {
+                "id": row["OrderID"],
+                "buyer": row["Username"] or "Guest account",
+                "eventDate": row["EventDate"],
+                "tickets": row["Tickets"],
+                "total": float(row["TotalPrice"] or 0),
+                "status": row["Status"],
+            }
+            for row in recent_rows
+        ],
+    }
+
+
 def make_qr_data_url(payload: dict) -> str | None:
+    qr_payload = json.dumps(payload, separators=(",", ":"), sort_keys=True)
     try:
-        qr_payload = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+        cache_path = ROOT / "data" / "swift-module-cache"
+        cache_path.mkdir(parents=True, exist_ok=True)
+        environment = os.environ.copy()
+        environment["CLANG_MODULE_CACHE_PATH"] = str(cache_path)
         result = subprocess.run(
             ["swift", str(QR_SCRIPT_PATH), qr_payload],
             check=True,
             capture_output=True,
             text=True,
             timeout=12,
+            env=environment,
         )
         encoded = result.stdout.strip()
         if encoded:
             return f"data:image/png;base64,{encoded}"
     except Exception:
-        return None
+        pass
+
+    svg = make_svg_qr(qr_payload) or make_svg_qr(qr_compact_payload(payload))
+    if svg:
+        encoded_svg = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+        return f"data:image/svg+xml;base64,{encoded_svg}"
     return None
 
 
@@ -230,12 +716,27 @@ class TixlyHandler(SimpleHTTPRequestHandler):
                     self.send_json({"events": fetch_events({"organizerId": str(organizer_id)})})
                     return
 
+                if len(parts) == 6 and parts[3] == "events" and parts[5] == "analytics":
+                    try:
+                        event_id = int(parts[4])
+                    except ValueError:
+                        self.send_json({"error": "Invalid event id."}, HTTPStatus.BAD_REQUEST)
+                        return
+
+                    analytics = organizer_event_analytics(connection, organizer_id, event_id)
+                    if not analytics:
+                        self.send_json({"error": "Event not found for this organizer."}, HTTPStatus.NOT_FOUND)
+                        return
+                    self.send_json({"analytics": analytics})
+                    return
+
             self.send_json({"organizer": public_organizer(organizer)})
             return
 
         if parsed.path.startswith("/api/users/"):
+            parts = parsed.path.strip("/").split("/")
             try:
-                user_id = int(parsed.path.rsplit("/", 1)[1])
+                user_id = int(parts[2])
             except ValueError:
                 self.send_json({"error": "Invalid user id."}, HTTPStatus.BAD_REQUEST)
                 return
@@ -243,11 +744,25 @@ class TixlyHandler(SimpleHTTPRequestHandler):
             with connect_db() as connection:
                 user = connection.execute("SELECT * FROM USER WHERE UserID = ?", (user_id,)).fetchone()
 
-            if not user:
-                self.send_json({"error": "User session is no longer valid."}, HTTPStatus.NOT_FOUND)
-                return
+                if not user:
+                    self.send_json({"error": "User session is no longer valid."}, HTTPStatus.NOT_FOUND)
+                    return
 
-            self.send_json({"user": public_user(user)})
+                if len(parts) == 5 and parts[3] == "reservations":
+                    try:
+                        order_id = int(parts[4])
+                    except ValueError:
+                        self.send_json({"error": "Invalid reservation id."}, HTTPStatus.BAD_REQUEST)
+                        return
+
+                    details = ticket_details_for_order(connection, user_id, order_id)
+                    if not details:
+                        self.send_json({"error": "Reservation not found."}, HTTPStatus.NOT_FOUND)
+                        return
+                    self.send_json(details)
+                    return
+
+                self.send_json({"user": public_user(user), "reservations": user_reservations(connection, user_id)})
             return
         
         # if parsed.path.startswith
@@ -258,6 +773,7 @@ class TixlyHandler(SimpleHTTPRequestHandler):
         routes = {
             "/api/signup": self.handle_signup,
             "/api/login": self.handle_login,
+            "/api/users/update": self.handle_user_update,
             "/api/reserve": self.handle_reserve,
             "/api/organizer/signup": self.handle_organizer_signup,
             "/api/organizer/login": self.handle_organizer_login,
@@ -341,6 +857,54 @@ class TixlyHandler(SimpleHTTPRequestHandler):
             return
 
         self.send_json({"user": public_user(user)})
+
+    def handle_user_update(self, payload: dict) -> None:
+        user_id = int(payload.get("userId") or 0)
+        username = str(payload.get("username") or "").strip()
+        password = str(payload.get("password") or "")
+
+        if user_id <= 0:
+            raise ValueError("Please log in again before editing your profile.")
+        if not username:
+            raise ValueError("Enter your name.")
+        if password and len(password) < 4:
+            raise ValueError("Password must be at least 4 characters.")
+
+        with connect_db() as connection:
+            user = connection.execute("SELECT * FROM USER WHERE UserID = ?", (user_id,)).fetchone()
+            if not user:
+                self.send_json({"error": "User session is no longer valid."}, HTTPStatus.UNAUTHORIZED)
+                return
+
+            if password:
+                salt, digest = hash_password(password)
+                connection.execute(
+                    """
+                    UPDATE USER
+                    SET Username = ?,
+                        PasswordSalt = ?,
+                        PasswordHash = ?
+                    WHERE UserID = ?
+                    """,
+                    (username, salt, digest, user_id),
+                )
+            else:
+                connection.execute(
+                    """
+                    UPDATE USER
+                    SET Username = ?
+                    WHERE UserID = ?
+                    """,
+                    (username, user_id),
+                )
+
+            updated_user = connection.execute("SELECT * FROM USER WHERE UserID = ?", (user_id,)).fetchone()
+            self.send_json(
+                {
+                    "user": public_user(updated_user),
+                    "reservations": user_reservations(connection, user_id),
+                }
+            )
 
     def handle_organizer_signup(self, payload: dict) -> None:
         name = str(payload.get("name") or "").strip()

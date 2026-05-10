@@ -37,7 +37,8 @@
               <button class="link-button" type="button" id="openOrganizerButton">Organizer</button>
             </div>
             <div class="session-nav" id="sessionNav">
-              <span id="sessionLabel">Not signed in</span>
+              <!-- <span id="sessionLabel">Not signed in</span> -->
+              <button class="link-button" type="button" id="openUserProfileButton" hidden>Profile</button>
               <button class="link-button" type="button" id="openOrganizerSessionButton">Organizer</button>
               <button class="link-button" type="button" id="signOutButton">Sign out</button>
             </div>
@@ -207,6 +208,52 @@
       </section>
     </div>
 
+    <div class="user-modal" id="userModal" hidden>
+      <button class="modal-backdrop pale-backdrop" type="button" id="closeUserBackdrop" aria-label="Close User Profile"></button>
+      <section class="user-panel" aria-labelledby="userTitle" aria-modal="true" role="dialog">
+        <button class="close-button light-close" type="button" id="closeUserButton" aria-label="Close">&times;</button>
+        <div class="user-dashboard-header">
+          <div>
+            <span class="eyebrow">Account</span>
+            <h2 id="userTitle">User dashboard</h2>
+          </div>
+          <span id="profileSessionLabel"></span>
+        </div>
+
+        <div class="user-dashboard" id="userDashboard">
+          <section class="profile-card" aria-label="Profile information">
+            <h3>Your information</h3>
+            <form class="profile-form" id="userProfileForm">
+              <label>
+                Name
+                <input id="profileNameInput" type="text" autocomplete="name" required />
+              </label>
+              <label>
+                Email
+                <input id="profileEmailInput" type="email" autocomplete="email" readonly />
+              </label>
+              <label>
+                New password
+                <input id="profilePasswordInput" type="password" autocomplete="new-password" placeholder="Leave blank to keep current password" />
+              </label>
+              <button type="submit">Save changes</button>
+              <p class="profile-status" id="profileStatus" role="status"></p>
+            </form>
+          </section>
+
+          <section class="profile-card" aria-label="Reservation history">
+            <div class="profile-card-heading">
+              <h3>Your reservations</h3>
+              <span id="profileReservationCount">0 orders</span>
+            </div>
+            <div class="profile-reservations" id="profileReservationsList">
+              <p class="empty-state">No reservations yet.</p>
+            </div>
+          </section>
+        </div>
+      </section>
+    </div>
+
     <div class="organizer-modal" id="organizerModal" hidden>
       <button class="modal-backdrop pale-backdrop" type="button" id="closeOrganizerBackdrop" aria-label="Close organizer tools"></button>
       <section class="organizer-panel" aria-labelledby="organizerTitle" aria-modal="true" role="dialog">
@@ -245,25 +292,46 @@
               <button type="submit">Save venue</button>
             </form>
 
-            <form class="organizer-form" id="eventForm">
-              <h3>Create event</h3>
-              <input id="eventNameInput" type="text" placeholder="Event name" required />
-              <select id="eventVenueInput" required></select>
-              <select id="eventCategoryInput">
-                <option>Music</option>
-                <option>Sports</option>
-                <option>Conference</option>
-                <option>Comedy</option>
-                <option>Theater</option>
-              </select>
-              <input id="eventDatesInput" type="text" placeholder="Dates: 2026-08-01, 2026-08-02" required />
-              <input id="eventStartTimeInput" type="time" required />
-              <input id="eventPriceInput" type="number" min="1" step="0.01" placeholder="Ticket price" required />
-              <input id="eventCapacityInput" type="number" min="1" step="1" placeholder="Event capacity" required />
-              <input id="eventImageInput" type="url" placeholder="Image URL optional" />
-              <button type="submit" id="eventSubmitButton">Publish event</button>
-              <button type="button" id="cancelEventEditButton" class="cancel-edit-button" hidden>Cancel edit</button>
-            </form>
+            <div class="event-management-panel">
+              <form class="organizer-form" id="eventForm">
+                <h3 id="eventFormTitle">Create event</h3>
+                <input id="eventNameInput" type="text" placeholder="Event name" required />
+                <select id="eventVenueInput" required></select>
+                <select id="eventCategoryInput">
+                  <option>Music</option>
+                  <option>Sports</option>
+                  <option>Conference</option>
+                  <option>Comedy</option>
+                  <option>Theater</option>
+                </select>
+                <input id="eventDatesInput" type="text" placeholder="Dates: 2026-08-01, 2026-08-02" required />
+                <input id="eventStartTimeInput" type="time" required />
+                <input id="eventPriceInput" type="number" min="1" step="0.01" placeholder="Ticket price" required />
+                <input id="eventCapacityInput" type="number" min="1" step="1" placeholder="Event capacity" required />
+                <input id="eventImageInput" type="url" placeholder="Image URL optional" />
+                <button type="submit" id="eventSubmitButton">Publish event</button>
+                <button type="button" id="cancelEventEditButton" class="cancel-edit-button" hidden>Cancel edit</button>
+              </form>
+
+              <section class="event-analytics-panel" id="eventAnalyticsPanel" hidden>
+                <div class="analytics-heading">
+                  <div>
+                    <span class="eyebrow">Analytics</span>
+                    <h3 id="analyticsEventTitle">Select an event</h3>
+                  </div>
+                  <span id="analyticsSellThrough"></span>
+                </div>
+                <div class="analytics-metrics" id="analyticsMetrics"></div>
+                <div class="analytics-breakdown">
+                  <h4>By date</h4>
+                  <div id="analyticsDateList"></div>
+                </div>
+                <div class="analytics-breakdown">
+                  <h4>Recent orders</h4>
+                  <div id="analyticsOrderList"></div>
+                </div>
+              </section>
+            </div>
             <section class="organizer-events">
               <h3>Your Events</h3>
               <div id="organizerEventsList" class="organizer-event-list">

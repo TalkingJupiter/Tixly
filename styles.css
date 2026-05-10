@@ -169,6 +169,7 @@ button {
 }
 
 .auth-modal,
+.user-modal,
 .organizer-modal,
 .detail-modal,
 .checkout-modal,
@@ -179,6 +180,10 @@ button {
   display: grid;
   place-items: center;
   padding: 22px;
+}
+
+.ticket-modal {
+  z-index: 50;
 }
 
 .modal-backdrop {
@@ -443,7 +448,11 @@ button {
   min-width: 0;
 }
 
-.event-card button {
+.event-card {
+  min-width: 0;
+}
+
+.event-card-button {
   width: 100%;
   display: grid;
   gap: 12px;
@@ -554,6 +563,7 @@ button {
 }
 
 .detail-modal[hidden],
+.user-modal[hidden],
 .organizer-modal[hidden],
 .checkout-modal[hidden],
 .ticket-modal[hidden],
@@ -563,6 +573,7 @@ button {
 
 .event-detail-panel,
 .checkout-panel,
+.user-panel,
 .organizer-panel {
   position: relative;
   z-index: 1;
@@ -580,11 +591,155 @@ button {
   width: min(1040px, 96vw);
 }
 
+.user-panel {
+  width: min(860px, 96vw);
+}
+
+.user-dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: start;
+  margin-bottom: 18px;
+  padding-right: 46px;
+}
+
+.user-dashboard-header h2 {
+  margin: 6px 0 0;
+  font-size: 30px;
+  line-height: 1.1;
+}
+
+.user-dashboard-header > span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.user-dashboard {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.78fr) minmax(0, 1.22fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.profile-card {
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+  background: #fff;
+}
+
+.profile-card h3,
+.profile-reservation-card h4 {
+  margin: 0;
+}
+
+.profile-card-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: baseline;
+}
+
+.profile-card-heading span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.profile-form,
+.profile-reservations {
+  display: grid;
+  gap: 12px;
+}
+
+.profile-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.profile-form input {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 12px;
+  color: var(--ink);
+  background: #fff;
+}
+
+.profile-form input[readonly] {
+  color: var(--muted);
+  background: var(--soft);
+}
+
+.profile-form button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  font-weight: 900;
+  background: #000;
+}
+
+.profile-status {
+  min-height: 20px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.profile-reservation-card {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  color: inherit;
+  text-align: left;
+  background: var(--soft);
+}
+
+.profile-reservation-card:hover,
+.profile-reservation-card:focus-visible {
+  border-color: var(--accent);
+  background: #fff;
+}
+
+.profile-reservation-card p,
+.profile-reservation-card small,
+.profile-reservation-card span {
+  margin: 0;
+  color: var(--muted);
+}
+
+.profile-reservation-card > div:last-child {
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+  text-align: right;
+}
+
 .organizer-auth-grid,
 .organizer-workspace {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
+  align-items: start;
+}
+
+#venueForm {
+  align-self: start;
 }
 
 .organizer-form {
@@ -598,6 +753,11 @@ button {
 
 .organizer-form h3 {
   margin: 0;
+}
+
+.event-management-panel {
+  display: grid;
+  gap: 14px;
 }
 
 .organizer-form input,
@@ -645,6 +805,87 @@ button {
   margin: 0;
 }
 
+.event-analytics-panel {
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+  background: #fff;
+}
+
+.analytics-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: start;
+}
+
+.analytics-heading h3 {
+  margin: 4px 0 0;
+}
+
+.analytics-heading > span {
+  border-radius: 999px;
+  padding: 7px 10px;
+  color: #fff;
+  background: var(--accent);
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.analytics-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.analytics-metrics div {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--soft);
+}
+
+.analytics-metrics strong {
+  font-size: 18px;
+}
+
+.analytics-metrics span,
+.analytics-row small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.analytics-breakdown {
+  display: grid;
+  gap: 8px;
+}
+
+.analytics-breakdown h4 {
+  margin: 0;
+}
+
+.analytics-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  border-top: 1px solid var(--line);
+  padding-top: 9px;
+}
+
+.analytics-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .organizer-event-list {
   display: grid;
   gap: 12px;
@@ -652,13 +893,31 @@ button {
 
 .organizer-event-card {
   display: grid;
-  grid-template-columns: 110px 1fr auto;
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
   align-items: center;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 12px;
   background: var(--soft);
+}
+
+.organizer-event-card.active {
+  border-color: var(--accent);
+  background: #fff;
+}
+
+.organizer-event-main {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  text-align: left;
+  background: transparent;
 }
 
 .organizer-event-info {
@@ -707,7 +966,8 @@ button {
   background: var(--soft) !important;
 }
 
-.organizer-event-card img {
+.organizer-event-card img,
+.organizer-event-main img {
   width: 110px;
   height: 82px;
   border-radius: 6px;
@@ -1158,7 +1418,7 @@ button {
   position: fixed;
   left: 50%;
   bottom: 24px;
-  z-index: 30;
+  z-index: 80;
   transform: translateX(-50%) translateY(16px);
   opacity: 0;
   border-radius: 999px;
@@ -1188,8 +1448,13 @@ button {
   }
 
   .organizer-auth-grid,
-  .organizer-workspace {
+  .organizer-workspace,
+  .user-dashboard {
     grid-template-columns: 1fr;
+  }
+
+  .analytics-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .spotlight {
@@ -1267,7 +1532,34 @@ button {
     grid-template-columns: 1fr;
   }
 
-  .organizer-event-card img {
+  .organizer-event-main,
+  .analytics-row {
+    grid-template-columns: 1fr;
+  }
+
+  .user-dashboard-header,
+  .profile-card-heading,
+  .profile-reservation-card {
+    grid-template-columns: 1fr;
+  }
+
+  .user-dashboard-header,
+  .profile-card-heading {
+    display: grid;
+  }
+
+  .user-dashboard-header > span,
+  .profile-card-heading span {
+    white-space: normal;
+  }
+
+  .profile-reservation-card > div:last-child {
+    justify-items: start;
+    text-align: left;
+  }
+
+  .organizer-event-card img,
+  .organizer-event-main img {
     width: 100%;
     height: 160px;
   }
