@@ -1,0 +1,1 @@
+To see the website run `python server.py`
